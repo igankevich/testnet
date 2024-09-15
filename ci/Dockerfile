@@ -33,6 +33,15 @@ RUN curl --location --silent --fail --output /usr/local/bin/shfmt https://github
 
 COPY --from=ghcr.io/staex-io/cijail:latest / /usr/local
 
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install --no-install-recommends \
+    iputils-ping \
+    iproute2 \
+    curl \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 LABEL org.opencontainers.image.source=https://github.com/igankevich/testnet
 LABEL org.opencontainers.image.description="CI image"
 
