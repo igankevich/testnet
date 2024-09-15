@@ -3,6 +3,7 @@ name = "testnet"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "A library that helps you test your distributed applications on a virtual network via Linux namespaces"
 
 [dependencies]
 bincode = { version = "2.0.0-rc.3", features = ["std", "serde", "derive"], default-features = false }
