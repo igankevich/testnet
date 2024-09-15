@@ -46,8 +46,8 @@ impl Network {
     ///
     /// Launches child processes in their own network namespaces.
     /// See `testnet` for more details.
-    pub fn new<F: FnOnce(Context) -> CallbackResult + Clone>(
-        config: NetConfig<F>,
+    pub fn new<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
+        config: NetConfig<C, F>,
     ) -> Result<Self, std::io::Error> {
         let (sender, receiver) = pipe_channel()?;
         let main = Process::spawn(
@@ -89,8 +89,8 @@ impl Network {
 /// and this process in turn launches another child process for each network node
 /// (again in its own network namespace).
 /// Nodes do not have access to the outside network.
-pub fn testnet<F: FnOnce(Context) -> CallbackResult + Clone>(
-    config: NetConfig<F>,
+pub fn testnet<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
+    config: NetConfig<C, F>,
 ) -> Result<(), std::io::Error> {
     let network = Network::new(config)?;
     match network.wait()? {
@@ -99,9 +99,9 @@ pub fn testnet<F: FnOnce(Context) -> CallbackResult + Clone>(
     }
 }
 
-fn network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
+fn network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver: PipeReceiver,
-    config: NetConfig<F>,
+    config: NetConfig<C, F>,
 ) -> c_int {
     match do_network_switch_main(receiver, config) {
         Ok(_) => 0,
@@ -112,9 +112,9 @@ fn network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     }
 }
 
-fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
+fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver: PipeReceiver,
-    config: NetConfig<F>,
+    config: NetConfig<C, F>,
 ) -> CallbackResult {
     set_process_name(SWITCH_NAME)?;
     sethostname(SWITCH_NAME)?;
@@ -126,7 +126,8 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     let mut nodes: Vec<Process> = Vec::with_capacity(config.nodes.len());
     let net = IpNet::new(Ipv4Addr::new(10, 84, 0, 0).into(), 16)?;
     let mut all_node_configs = Vec::with_capacity(config.nodes.len());
-    for (i, mut node_config) in config.nodes.into_iter().enumerate() {
+    for (i, node_config) in config.nodes.into_iter().enumerate() {
+        let mut node_config: NodeConfig = node_config.into();
         if node_config.name.is_empty() {
             node_config.name = outer_ifname(i);
         }

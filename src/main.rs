@@ -8,10 +8,10 @@ use bincode::encode_to_vec;
 use bincode::Decode;
 use bincode::Encode;
 use clap::Parser;
-use testnet::log_format;
 use testnet::Context;
 use testnet::NetConfig;
 use testnet::Network;
+use testnet::NodeConfig;
 
 #[derive(Parser)]
 #[command(
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
     match do_main() {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            log_format!("{}", e);
+            eprintln!("{}", e);
             ExitCode::FAILURE
         }
     }
@@ -61,7 +61,7 @@ fn do_main() -> Result<(), Box<dyn std::error::Error>> {
             env.set_for_command("NODE", &mut command);
             Err(command.args(&args.args).exec().into())
         },
-        nodes: vec![Default::default(); args.nodes],
+        nodes: vec![NodeConfig::default(); args.nodes],
     };
     let network = Network::new(config)?;
     network.wait()?;
@@ -116,4 +116,5 @@ const fn bincode_config() -> bincode::config::Configuration<
         .with_fixed_int_encoding()
         .with_limit::<MAX_MESSAGE_SIZE>()
 }
+
 pub(crate) const MAX_MESSAGE_SIZE: usize = 4096 * 16;

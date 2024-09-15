@@ -5,6 +5,7 @@ use std::process::Command;
 
 use testnet::testnet;
 use testnet::NetConfig;
+use testnet::NodeConfig;
 
 #[test]
 fn net2() {
@@ -34,7 +35,7 @@ fn net2() {
                 .status()?;
             Ok(())
         },
-        nodes: vec![Default::default(), Default::default()],
+        nodes: vec!["node1", "node2"],
     };
     testnet(config).unwrap();
 }
@@ -59,7 +60,7 @@ fn broadcast_one() {
             };
             Ok(())
         },
-        nodes: vec![Default::default(), Default::default()],
+        nodes: vec![NodeConfig::default(); 2],
     };
     testnet(config).unwrap();
 }
@@ -75,7 +76,7 @@ fn broadcast_all() {
             }
             Ok(())
         },
-        nodes: vec![Default::default(), Default::default()],
+        nodes: vec![NodeConfig::default(); 2],
     };
     testnet(config).unwrap();
 }
@@ -96,7 +97,7 @@ fn handle_panic() {
             };
             Ok(())
         },
-        nodes: vec![Default::default(), Default::default()],
+        nodes: vec![NodeConfig::default(); 2],
     };
     testnet(config).unwrap();
 }

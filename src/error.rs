@@ -1,4 +1,3 @@
-#[macro_export]
 macro_rules! log_format {
     ($fmt_str:literal) => {
         {
@@ -18,9 +17,11 @@ macro_rules! log_format {
     };
 }
 
-#[macro_export]
 macro_rules! format_error {
     ($($args:expr),*) => {
         ::std::io::Error::new(::std::io::ErrorKind::Other, format!($($args),*))
     };
 }
+
+pub(crate) use format_error;
+pub(crate) use log_format;
