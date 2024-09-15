@@ -11,6 +11,7 @@ use std::path::Path;
 use ipnet::IpNet;
 use mio_pidfd::PidFd;
 use nix::mount::mount;
+use nix::mount::umount;
 use nix::mount::MsFlags;
 use nix::sched::setns;
 use nix::sched::CloneFlags;
@@ -159,6 +160,8 @@ fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackRes
                 buf
             }),
     )?;
+    // try to unmount first
+    let _ = umount("/etc/hosts");
     mount(
         Some(hosts.as_path()),
         "/etc/hosts",
