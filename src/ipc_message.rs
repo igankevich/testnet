@@ -17,6 +17,8 @@ pub(crate) enum IpcMessage {
     Send(BroadcastPayload),
     Receive,
     Wait,
+    BroadcastAllSend(BroadcastPayload),
+    BroadcastAllRecv(Vec<BroadcastPayload>),
 }
 
 pub(crate) type BroadcastPayload = Vec<u8>;

@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::os::fd::AsRawFd;
+use std::os::fd::RawFd;
 use std::os::fd::OwnedFd;
 
 use ipnet::IpNet;
@@ -26,7 +27,6 @@ use nix::sys::socket::AddressFamily;
 use nix::sys::socket::SockFlag;
 use nix::sys::socket::SockProtocol;
 use nix::sys::socket::SockType;
-use nix::unistd::Pid;
 
 pub(crate) struct Netlink {
     socket: OwnedFd,
@@ -121,13 +121,12 @@ impl Netlink {
     pub(crate) fn set_network_namespace(
         &mut self,
         name: impl ToString,
-        pid: Pid,
+        fd: RawFd,
     ) -> Result<(), std::io::Error> {
         let mut link = LinkMessage::default();
         link.attributes
             .push(LinkAttribute::IfName(name.to_string()));
-        link.attributes
-            .push(LinkAttribute::NetNsPid(pid.as_raw() as u32));
+        link.attributes.push(LinkAttribute::NetNsFd(fd));
         let mut message = NetlinkMessage::from(RouteNetlinkMessage::SetLink(link));
         message.header.flags = NLM_F_REQUEST | NLM_F_ACK;
         message.finalize();

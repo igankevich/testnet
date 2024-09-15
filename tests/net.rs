@@ -40,21 +40,20 @@ fn net2() {
 }
 
 #[test]
-fn ipc() {
+fn broadcast_one() {
     let config = NetConfig {
         main: |mut context| {
             let i = context.current_node_index();
             match i {
                 0 => {
                     eprintln!("node {i} send start");
-                    context.send("ping".into())?;
+                    context.broadcast_one().send_string("ping".into())?;
                     eprintln!("node {i} send end");
                 }
                 _ => {
                     eprintln!("node {i} receive start");
-                    let data = context.recv()?;
+                    let string = context.broadcast_one().recv_string()?;
                     eprintln!("node {i} receive end");
-                    let string = String::from_utf8(data).unwrap();
                     assert_eq!("ping", string);
                 }
             };
@@ -66,8 +65,24 @@ fn ipc() {
 }
 
 #[test]
+fn broadcast_all() {
+    let config = NetConfig {
+        main: |mut context| {
+            let i = context.current_node_index();
+            let all_data = context.broadcast_all_string(i.to_string())?;
+            for (i, data) in all_data.into_iter().enumerate() {
+                assert_eq!(i.to_string(), data);
+            }
+            Ok(())
+        },
+        nodes: vec![Default::default(), Default::default()],
+    };
+    testnet(config).unwrap();
+}
+
+#[test]
 #[should_panic]
-fn failure() {
+fn handle_panic() {
     let config = NetConfig {
         main: |context| {
             let i = context.current_node_index();

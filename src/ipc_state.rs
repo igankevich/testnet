@@ -13,6 +13,7 @@ pub(crate) struct IpcStateMachine {
     /// Node index of the initiator.
     broadcast_initiator: Option<usize>,
     broadcasts: HashMap<usize, Broadcast>,
+    broadcast_alls: HashMap<usize, Vec<u8>>,
 }
 
 impl IpcStateMachine {
@@ -21,6 +22,7 @@ impl IpcStateMachine {
             num_nodes,
             broadcast_initiator: None,
             broadcasts: Default::default(),
+            broadcast_alls: Default::default(),
         }
     }
 
@@ -49,9 +51,18 @@ impl IpcStateMachine {
             IpcMessage::Wait => {
                 self.insert_broadcast(from_node_index, Broadcast::Wait)?;
             }
+            IpcMessage::BroadcastAllSend(payload) => {
+                self.insert_broadcast_all(from_node_index, payload)?;
+            }
+            IpcMessage::BroadcastAllRecv(..) => {
+                return Err(format_error!("`BroadcastAllRecv` is `IpcClient`-only"));
+            }
         }
         if self.broadcasts.len() == self.num_nodes {
             self.finalize_broadcast(clients, writer_token, poll)?;
+        }
+        if self.broadcast_alls.len() == self.num_nodes {
+            self.finalize_broadcast_all(clients, writer_token, poll)?;
         }
         Ok(())
     }
@@ -99,6 +110,38 @@ impl IpcStateMachine {
         }
         self.broadcasts.clear();
         self.broadcast_initiator = None;
+        Ok(())
+    }
+
+    fn insert_broadcast_all(&mut self, i: usize, value: Vec<u8>) -> Result<(), std::io::Error> {
+        use std::collections::hash_map::Entry;
+        match self.broadcast_alls.entry(i) {
+            Entry::Vacant(v) => {
+                v.insert(value);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(std::io::Error::other(
+                "only one message per broadcast is permitted",
+            )),
+        }
+    }
+
+    fn finalize_broadcast_all(
+        &mut self,
+        clients: &mut [IpcClient],
+        writer_token: Token,
+        poll: &mut Poll,
+    ) -> Result<(), std::io::Error> {
+        let mut payload = vec![Vec::new(); clients.len()];
+        for (i, value) in self.broadcast_alls.drain() {
+            payload[i] = value;
+        }
+        for i in 0..clients.len() {
+            let message = IpcMessage::BroadcastAllRecv(payload.clone());
+            clients[i].send(&message)?;
+            clients[i].send_finalize(writer_token, poll)?;
+        }
+        self.broadcast_alls.clear();
         Ok(())
     }
 }

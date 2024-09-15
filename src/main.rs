@@ -3,8 +3,13 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::process::ExitCode;
 
+use bincode::decode_from_slice;
+use bincode::encode_to_vec;
+use bincode::Decode;
+use bincode::Encode;
 use clap::Parser;
 use testnet::log_format;
+use testnet::Context;
 use testnet::NetConfig;
 use testnet::Network;
 
@@ -43,26 +48,18 @@ fn do_main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", env!("VERSION"));
         return Ok(());
     }
-    // TODO write each node's env variables to a separate file
-    // TODO netlink is slow (non-blocking?)
     let config = NetConfig {
-        main: |context| {
-            let node = context.current_node();
-            Err(Command::new(&args.program)
-                .args(&args.args)
-                .env(
-                    "TESTNET_NODE_INDEX",
-                    context.current_node_index().to_string(),
-                )
-                .env("TESTNET_NODE_NAME", &node.name)
-                .env("TESTNET_NODE_IFADDR", node.ifaddr.to_string())
-                .env("TESTNET_NODE_IPADDR", node.ifaddr.addr().to_string())
-                .env(
-                    "TESTNET_NODE_PREFIX_LEN",
-                    node.ifaddr.prefix_len().to_string(),
-                )
-                .exec()
-                .into())
+        main: |mut context| {
+            let env = Environment::new(&context);
+            let all_data = context.broadcast_all(env.encode()?)?;
+            let mut command = Command::new(&args.program);
+            for (i, data) in all_data.into_iter().enumerate() {
+                let env = Environment::decode(&data)?;
+                let infix = i.to_string();
+                env.set_for_command(&infix, &mut command);
+            }
+            env.set_for_command("NODE", &mut command);
+            Err(command.args(&args.args).exec().into())
         },
         nodes: vec![Default::default(); args.nodes],
     };
@@ -70,3 +67,53 @@ fn do_main() -> Result<(), Box<dyn std::error::Error>> {
     network.wait()?;
     Ok(())
 }
+
+#[derive(Encode, Decode)]
+struct Environment {
+    envs: [(String, String); 6],
+}
+
+impl Environment {
+    fn new(context: &Context) -> Self {
+        let node = context.current_node();
+        Self {
+            envs: [
+                ("INDEX".into(), context.current_node_index().to_string()),
+                ("NAME".into(), node.name.clone()),
+                ("IFNAME".into(), context.current_node_ifname().to_string()),
+                ("IFADDR".into(), node.ifaddr.to_string()),
+                ("IPADDR".into(), node.ifaddr.addr().to_string()),
+                ("PREFIX_LEN".into(), node.ifaddr.prefix_len().to_string()),
+            ],
+        }
+    }
+
+    fn set_for_command(&self, infix: &str, command: &mut Command) {
+        for (key, value) in self.envs.iter() {
+            let key = format!("TESTNET_{}_{}", infix, key);
+            command.env(key, value);
+        }
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, std::io::Error> {
+        encode_to_vec(self, bincode_config()).map_err(std::io::Error::other)
+    }
+
+    fn decode(data: &[u8]) -> Result<Self, std::io::Error> {
+        let (object, ..): (Self, usize) =
+            decode_from_slice(data, bincode_config()).map_err(std::io::Error::other)?;
+        Ok(object)
+    }
+}
+
+const fn bincode_config() -> bincode::config::Configuration<
+    bincode::config::LittleEndian,
+    bincode::config::Fixint,
+    bincode::config::Limit<MAX_MESSAGE_SIZE>,
+> {
+    bincode::config::standard()
+        .with_little_endian()
+        .with_fixed_int_encoding()
+        .with_limit::<MAX_MESSAGE_SIZE>()
+}
+pub(crate) const MAX_MESSAGE_SIZE: usize = 4096 * 16;
