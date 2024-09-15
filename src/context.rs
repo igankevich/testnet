@@ -43,6 +43,11 @@ impl Context {
         &self.nodes
     }
 
+    /// Configuration of node `i`.
+    pub fn node(&self, i: usize) -> &NodeConfig {
+        &self.nodes[i]
+    }
+
     /// Name the current step.
     ///
     /// Testnet will output the name of the step on failure.
@@ -79,7 +84,7 @@ impl Context {
     pub fn broadcast_all_string(&mut self, data: String) -> Result<Vec<String>, std::io::Error> {
         self.broadcast_all(data.into())?
             .into_iter()
-            .map(|data| String::from_utf8(data))
+            .map(String::from_utf8)
             .collect::<Result<Vec<String>, _>>()
             .map_err(std::io::Error::other)
     }

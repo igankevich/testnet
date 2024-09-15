@@ -136,10 +136,10 @@ impl IpcStateMachine {
         for (i, value) in self.broadcast_alls.drain() {
             payload[i] = value;
         }
-        for i in 0..clients.len() {
+        for client in clients.iter_mut() {
             let message = IpcMessage::BroadcastAllRecv(payload.clone());
-            clients[i].send(&message)?;
-            clients[i].send_finalize(writer_token, poll)?;
+            client.send(&message)?;
+            client.send_finalize(writer_token, poll)?;
         }
         self.broadcast_alls.clear();
         Ok(())

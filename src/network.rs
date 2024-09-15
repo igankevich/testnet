@@ -6,9 +6,12 @@ use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 use std::os::fd::RawFd;
+use std::path::Path;
 
 use ipnet::IpNet;
 use mio_pidfd::PidFd;
+use nix::mount::mount;
+use nix::mount::MsFlags;
 use nix::sched::setns;
 use nix::sched::CloneFlags;
 use nix::sys::prctl::set_name;
@@ -20,6 +23,7 @@ use nix::unistd::sethostname;
 use nix::unistd::Gid;
 use nix::unistd::Pid;
 use nix::unistd::Uid;
+use tempfile::TempDir;
 
 use crate::log_format;
 use crate::pipe_channel;
@@ -46,14 +50,17 @@ impl Network {
     ///
     /// Launches child processes in their own network namespaces.
     /// See `testnet` for more details.
-    pub fn new<F: FnOnce(Context) -> CallbackResult + Clone>(
-        config: NetConfig<F>,
+    pub fn new<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
+        config: NetConfig<C, F>,
     ) -> Result<Self, std::io::Error> {
         let (sender, receiver) = pipe_channel()?;
         let main = Process::spawn(
             || network_switch_main(receiver.into(), config),
             STACK_SIZE,
-            CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWUTS,
+            CloneFlags::CLONE_NEWNET
+                | CloneFlags::CLONE_NEWUSER
+                | CloneFlags::CLONE_NEWUTS
+                | CloneFlags::CLONE_NEWNS,
         )?;
         // update uid map
         std::fs::write(
@@ -89,8 +96,8 @@ impl Network {
 /// and this process in turn launches another child process for each network node
 /// (again in its own network namespace).
 /// Nodes do not have access to the outside network.
-pub fn testnet<F: FnOnce(Context) -> CallbackResult + Clone>(
-    config: NetConfig<F>,
+pub fn testnet<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
+    config: NetConfig<C, F>,
 ) -> Result<(), std::io::Error> {
     let network = Network::new(config)?;
     match network.wait()? {
@@ -99,9 +106,9 @@ pub fn testnet<F: FnOnce(Context) -> CallbackResult + Clone>(
     }
 }
 
-fn network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
+fn network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver: PipeReceiver,
-    config: NetConfig<F>,
+    config: NetConfig<C, F>,
 ) -> c_int {
     match do_network_switch_main(receiver, config) {
         Ok(_) => 0,
@@ -112,9 +119,9 @@ fn network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     }
 }
 
-fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
+fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver: PipeReceiver,
-    config: NetConfig<F>,
+    config: NetConfig<C, F>,
 ) -> CallbackResult {
     set_process_name(SWITCH_NAME)?;
     sethostname(SWITCH_NAME)?;
@@ -122,11 +129,11 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver.wait_until_closed()?;
     let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
     netlink.new_bridge(BRIDGE_IFNAME)?;
-    //let bridge_index = netlink.index(BRIDGE_IFNAME)?;
     let mut nodes: Vec<Process> = Vec::with_capacity(config.nodes.len());
     let net = IpNet::new(Ipv4Addr::new(10, 84, 0, 0).into(), 16)?;
     let mut all_node_configs = Vec::with_capacity(config.nodes.len());
-    for (i, mut node_config) in config.nodes.into_iter().enumerate() {
+    for (i, node_config) in config.nodes.into_iter().enumerate() {
+        let mut node_config: NodeConfig = node_config.into();
         if node_config.name.is_empty() {
             node_config.name = outer_ifname(i);
         }
@@ -140,6 +147,31 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
         }
         all_node_configs.push(node_config);
     }
+    let workdir = TempDir::new()?;
+    let hosts = workdir.path().join("hosts");
+    std::fs::write(
+        hosts.as_path(),
+        all_node_configs
+            .iter()
+            .fold(String::with_capacity(4096), |mut buf, node| {
+                use std::fmt::Write;
+                let _ = writeln!(&mut buf, "{} {}", node.ifaddr.addr(), node.name);
+                buf
+            }),
+    )?;
+    if let Err(e) = mount(
+        Some(hosts.as_path()),
+        "/etc/hosts",
+        None::<&Path>,
+        MsFlags::MS_BIND,
+        None::<&Path>,
+    ) {
+        log_format!(
+            "WARNING: bind mount failed ({}), node hostnames will not be available",
+            e
+        );
+    }
+    // TODO fall back on nss modules??? still will not work for musl
     let mut ipc_fds: Vec<(OwnedFd, OwnedFd, PidFd, OwnedFd, String)> =
         Vec::with_capacity(all_node_configs.len());
     for i in 0..all_node_configs.len() {

@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 mod config;
 mod context;
 mod error;
@@ -12,6 +13,7 @@ mod process;
 
 pub use self::config::*;
 pub use self::context::*;
+pub(crate) use self::error::*;
 pub(crate) use self::ipc_client::*;
 pub(crate) use self::ipc_message::*;
 pub(crate) use self::ipc_server::*;
