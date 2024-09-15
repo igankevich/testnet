@@ -165,7 +165,8 @@ fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackRes
         None::<&Path>,
         MsFlags::MS_BIND,
         None::<&Path>,
-    )?;
+    )
+    .map_err(|e| std::io::Error::other(format!("bind mount failed: {}", e)))?;
     let mut ipc_fds: Vec<(OwnedFd, OwnedFd, PidFd, OwnedFd, String)> =
         Vec::with_capacity(all_node_configs.len());
     for i in 0..all_node_configs.len() {
