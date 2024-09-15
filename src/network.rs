@@ -1,5 +1,6 @@
 use std::ffi::c_int;
 use std::ffi::CString;
+use std::fs::File;
 use std::net::Ipv4Addr;
 use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
@@ -8,6 +9,7 @@ use std::os::fd::RawFd;
 
 use ipnet::IpNet;
 use mio_pidfd::PidFd;
+use nix::sched::setns;
 use nix::sched::CloneFlags;
 use nix::sys::prctl::set_name;
 use nix::sys::socket::SockProtocol;
@@ -16,6 +18,7 @@ use nix::unistd::dup2;
 use nix::unistd::pipe;
 use nix::unistd::sethostname;
 use nix::unistd::Gid;
+use nix::unistd::Pid;
 use nix::unistd::Uid;
 
 use crate::log_format;
@@ -119,7 +122,7 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     receiver.wait_until_closed()?;
     let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
     netlink.new_bridge(BRIDGE_IFNAME)?;
-    let bridge_index = netlink.index(BRIDGE_IFNAME)?;
+    //let bridge_index = netlink.index(BRIDGE_IFNAME)?;
     let mut nodes: Vec<Process> = Vec::with_capacity(config.nodes.len());
     let net = IpNet::new(Ipv4Addr::new(10, 84, 0, 0).into(), 16)?;
     let mut all_node_configs = Vec::with_capacity(config.nodes.len());
@@ -140,11 +143,6 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
     let mut ipc_fds: Vec<(OwnedFd, OwnedFd, PidFd, OwnedFd, String)> =
         Vec::with_capacity(all_node_configs.len());
     for i in 0..all_node_configs.len() {
-        let outer = outer_ifname(i);
-        netlink.new_veth_pair(outer.clone(), INNER_IFNAME)?;
-        netlink.set_up(outer.clone())?;
-        netlink.set_bridge(outer, bridge_index)?;
-        let (sender, receiver) = pipe_channel()?;
         let (in_self, out_other) = pipe()?;
         let (in_other, out_self) = pipe()?;
         let (output_self, output_other) = pipe()?;
@@ -166,7 +164,6 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
                     OwnedFd::from_raw_fd(output_self_fd);
                 }
                 network_node_main(
-                    receiver.into(),
                     in_other_fd,
                     out_other_fd,
                     output_other_fd,
@@ -178,9 +175,6 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
             STACK_SIZE,
             CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUTS,
         )?;
-        netlink.set_network_namespace(INNER_IFNAME, process.id())?;
-        // notify the child process
-        sender.close()?;
         // drop unused pipe ends
         drop(in_other);
         drop(out_other);
@@ -215,7 +209,6 @@ fn do_network_switch_main<F: FnOnce(Context) -> CallbackResult + Clone>(
 }
 
 fn network_node_main<F: FnOnce(Context) -> CallbackResult>(
-    receiver: PipeReceiver,
     ipc_in_fd: RawFd,
     ipc_out_fd: RawFd,
     output_fd: RawFd,
@@ -223,15 +216,7 @@ fn network_node_main<F: FnOnce(Context) -> CallbackResult>(
     main: F,
     node_config: Vec<NodeConfig>,
 ) -> c_int {
-    match do_network_node_main(
-        receiver,
-        ipc_in_fd,
-        ipc_out_fd,
-        output_fd,
-        i,
-        main,
-        node_config,
-    ) {
+    match do_network_node_main(ipc_in_fd, ipc_out_fd, output_fd, i, main, node_config) {
         Ok(_) => 0,
         Err(e) => {
             log_format!("child `main` failed: {}", e);
@@ -241,7 +226,6 @@ fn network_node_main<F: FnOnce(Context) -> CallbackResult>(
 }
 
 fn do_network_node_main<F: FnOnce(Context) -> CallbackResult>(
-    receiver: PipeReceiver,
     ipc_in_fd: RawFd,
     ipc_out_fd: RawFd,
     output_fd: RawFd,
@@ -256,13 +240,7 @@ fn do_network_node_main<F: FnOnce(Context) -> CallbackResult>(
     nix::unistd::close(0)?;
     set_process_name(&nodes[i].name)?;
     sethostname(&nodes[i].name)?;
-    // wait for veth to be trasnferred to this process' network namespace
-    receiver.wait_until_closed()?;
-    let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
-    netlink.set_up(LOOPBACK_IFNAME)?;
-    let inner_index = netlink.index(INNER_IFNAME)?;
-    netlink.set_up(INNER_IFNAME)?;
-    netlink.set_ifaddr(inner_index, nodes[i].ifaddr)?;
+    configure_network(i, nodes[i].ifaddr)?;
     let ipc_in_fd = unsafe { OwnedFd::from_raw_fd(ipc_in_fd) };
     let ipc_out_fd = unsafe { OwnedFd::from_raw_fd(ipc_out_fd) };
     let context = Context {
@@ -271,8 +249,35 @@ fn do_network_node_main<F: FnOnce(Context) -> CallbackResult>(
         ipc_client: IpcClient::new(ipc_in_fd, ipc_out_fd),
         step_name: None,
         step: 0,
+        ifname: inner_ifname(i),
     };
     main(context).map_err(|e| format!("node `main` failed: {}", e).into())
+}
+
+fn configure_network(i: usize, ifaddr: IpNet) -> Result<(), std::io::Error> {
+    let old_ns_file = File::open(format!("/proc/{}/ns/net", Pid::this()))?;
+    let parent_ns_file = File::open(format!("/proc/{}/ns/net", Pid::parent()))?;
+    // go back to parent's network namespace
+    setns(parent_ns_file, CloneFlags::CLONE_NEWNET)?;
+    let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
+    let bridge_index = netlink.index(BRIDGE_IFNAME)?;
+    let inner = inner_ifname(i);
+    let outer = outer_ifname(i);
+    netlink.new_veth_pair(outer.clone(), inner.clone())?;
+    netlink.set_up(outer.clone())?;
+    netlink.set_bridge(outer.clone(), bridge_index)?;
+    netlink.set_network_namespace(inner.clone(), old_ns_file.as_raw_fd())?;
+    drop(netlink);
+    // go back to child's network namespace
+    setns(old_ns_file, CloneFlags::CLONE_NEWNET)?;
+    // we need new netlink socket because we changed ns
+    let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
+    netlink.set_up(LOOPBACK_IFNAME)?;
+    let inner_index = netlink.index(inner.clone())?;
+    netlink.set_up(inner)?;
+    netlink.set_ifaddr(inner_index, ifaddr)?;
+    drop(netlink);
+    Ok(())
 }
 
 fn wait_status_ok(status: &WaitStatus) -> bool {
@@ -291,6 +296,10 @@ fn outer_ifname(i: usize) -> String {
     format!("n{}", i)
 }
 
+fn inner_ifname(i: usize) -> String {
+    format!("veth{}", i)
+}
+
 fn set_process_name(name: &str) -> Result<(), std::io::Error> {
     let name = format!("testnet/{}", name);
     let c_string = CString::new(name)?;
@@ -298,7 +307,6 @@ fn set_process_name(name: &str) -> Result<(), std::io::Error> {
 }
 
 const STACK_SIZE: usize = 4096 * 16;
-const INNER_IFNAME: &str = "veth";
 const BRIDGE_IFNAME: &str = "testnet";
 const SWITCH_NAME: &str = "switch";
 const LOOPBACK_IFNAME: &str = "lo";
