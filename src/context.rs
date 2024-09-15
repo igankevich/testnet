@@ -79,7 +79,7 @@ impl Context {
     pub fn broadcast_all_string(&mut self, data: String) -> Result<Vec<String>, std::io::Error> {
         self.broadcast_all(data.into())?
             .into_iter()
-            .map(|data| String::from_utf8(data))
+            .map(String::from_utf8)
             .collect::<Result<Vec<String>, _>>()
             .map_err(std::io::Error::other)
     }

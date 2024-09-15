@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::os::fd::AsRawFd;
-use std::os::fd::RawFd;
 use std::os::fd::OwnedFd;
+use std::os::fd::RawFd;
 
 use ipnet::IpNet;
 use netlink_packet_core::NetlinkDeserializable;
