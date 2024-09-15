@@ -3,7 +3,14 @@ name = "testnet"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "A library that helps you test your distributed applications on a virtual network via Linux namespaces"
+homepage = "https://github.com/igankevich/testnet"
+repository = "https://github.com/igankevich/testnet"
+documentation = "https://docs.rs/testnet"
+readme = "README.md"
+description = "A library that helps you test your distributed applications using a virtual network via Linux namespaces"
+keywords = ["test"]
+categories = ["development-tools", "development-tools::testing"]
+include = ["**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [dependencies]
 bincode = { version = "2.0.0-rc.3", features = ["std", "serde", "derive"], default-features = false }
@@ -13,4 +20,13 @@ mio = { version = "1.0.1", features = ["net", "os-poll", "os-ext"], default-feat
 mio-pidfd = "0.3.0"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.20.1"
-nix = { version = "0.29.0", features = ["sched", "process", "signal", "hostname", "user", "socket", "fs", "poll"], default-features = false }
+nix = { version = "0.29.0", features = ["sched", "process", "signal", "hostname", "user", "socket", "fs", "poll", "mount"], default-features = false }
+tempfile = "3.12.0"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[lints.rust]
+missing_docs = "warn"

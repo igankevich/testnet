@@ -6,9 +6,12 @@ use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 use std::os::fd::RawFd;
+use std::path::Path;
 
 use ipnet::IpNet;
 use mio_pidfd::PidFd;
+use nix::mount::mount;
+use nix::mount::MsFlags;
 use nix::sched::setns;
 use nix::sched::CloneFlags;
 use nix::sys::prctl::set_name;
@@ -20,6 +23,7 @@ use nix::unistd::sethostname;
 use nix::unistd::Gid;
 use nix::unistd::Pid;
 use nix::unistd::Uid;
+use tempfile::TempDir;
 
 use crate::log_format;
 use crate::pipe_channel;
@@ -53,7 +57,10 @@ impl Network {
         let main = Process::spawn(
             || network_switch_main(receiver.into(), config),
             STACK_SIZE,
-            CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWUTS,
+            CloneFlags::CLONE_NEWNET
+                | CloneFlags::CLONE_NEWUSER
+                | CloneFlags::CLONE_NEWUTS
+                | CloneFlags::CLONE_NEWNS,
         )?;
         // update uid map
         std::fs::write(
@@ -122,7 +129,6 @@ fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackRes
     receiver.wait_until_closed()?;
     let mut netlink = Netlink::new(SockProtocol::NetlinkRoute)?;
     netlink.new_bridge(BRIDGE_IFNAME)?;
-    //let bridge_index = netlink.index(BRIDGE_IFNAME)?;
     let mut nodes: Vec<Process> = Vec::with_capacity(config.nodes.len());
     let net = IpNet::new(Ipv4Addr::new(10, 84, 0, 0).into(), 16)?;
     let mut all_node_configs = Vec::with_capacity(config.nodes.len());
@@ -141,6 +147,25 @@ fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackRes
         }
         all_node_configs.push(node_config);
     }
+    let workdir = TempDir::new()?;
+    let hosts = workdir.path().join("hosts");
+    std::fs::write(
+        hosts.as_path(),
+        all_node_configs
+            .iter()
+            .fold(String::with_capacity(4096), |mut buf, node| {
+                use std::fmt::Write;
+                let _ = writeln!(&mut buf, "{} {}", node.ifaddr.addr(), node.name);
+                buf
+            }),
+    )?;
+    mount(
+        Some(hosts.as_path()),
+        "/etc/hosts",
+        None::<&Path>,
+        MsFlags::MS_BIND,
+        None::<&Path>,
+    )?;
     let mut ipc_fds: Vec<(OwnedFd, OwnedFd, PidFd, OwnedFd, String)> =
         Vec::with_capacity(all_node_configs.len());
     for i in 0..all_node_configs.len() {

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+#![allow(missing_docs)]
 use std::process::Command;
 use std::str::from_utf8;
 

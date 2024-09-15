@@ -43,6 +43,11 @@ impl Context {
         &self.nodes
     }
 
+    /// Configuration of node `i`.
+    pub fn node(&self, i: usize) -> &NodeConfig {
+        &self.nodes[i]
+    }
+
     /// Name the current step.
     ///
     /// Testnet will output the name of the step on failure.

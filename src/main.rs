@@ -1,3 +1,7 @@
+/*!
+Command line tool that helps you test your distributed applications using a virtual network via Linux namespaces.
+*/
+
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
