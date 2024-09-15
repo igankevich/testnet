@@ -6,12 +6,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/igankevich/testnet-ci:latest
-      options: |
-        --cap-add SYS_PTRACE
-        --cap-add SYS_ADMIN
-        --cap-add NET_ADMIN
-        --cap-add DAC_OVERRIDE
-        --security-opt seccomp=unconfined
+      options: --cap-add SYS_PTRACE --cap-add SYS_ADMIN --cap-add NET_ADMIN --cap-add
+        DAC_OVERRIDE --security-opt seccomp=unconfined
     env:
       TZ: Europe/Berlin
       RUST_BACKTRACE: 1
