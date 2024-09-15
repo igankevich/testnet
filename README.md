@@ -66,3 +66,10 @@ let config = NetConfig {
 };
 testnet(config).unwrap();
 ```
+
+
+## Docker
+
+To run this inside Docker you need to allow [`clone(2)`](https://man7.org/linux/man-pages/man2/clone.2.html) system call.
+The easiest way of doing this is to specify `--security-opt seccomp=unconfined` option on the Docker command line.
+Please, note that on Github runner you might need full-blown `--privileged` for this crate to work.

@@ -11,7 +11,6 @@ use std::path::Path;
 use ipnet::IpNet;
 use mio_pidfd::PidFd;
 use nix::mount::mount;
-use nix::mount::umount;
 use nix::mount::MsFlags;
 use nix::sched::setns;
 use nix::sched::CloneFlags;
@@ -160,16 +159,19 @@ fn do_network_switch_main<C: Into<NodeConfig>, F: FnOnce(Context) -> CallbackRes
                 buf
             }),
     )?;
-    // try to unmount first
-    let _ = umount("/etc/hosts");
-    mount(
+    if let Err(e) = mount(
         Some(hosts.as_path()),
         "/etc/hosts",
         None::<&Path>,
         MsFlags::MS_BIND,
         None::<&Path>,
-    )
-    .map_err(|e| std::io::Error::other(format!("bind mount failed: {}", e)))?;
+    ) {
+        log_format!(
+            "WARNING: bind mount failed ({}), node hostnames will not be available",
+            e
+        );
+    }
+    // TODO fall back on nss modules??? still will not work for musl
     let mut ipc_fds: Vec<(OwnedFd, OwnedFd, PidFd, OwnedFd, String)> =
         Vec::with_capacity(all_node_configs.len());
     for i in 0..all_node_configs.len() {
