@@ -24,9 +24,9 @@ jobs:
       - name: Lint
         run: cijail ./ci/lint.sh
       - name: Test
-        run: cijail ./ci/test.sh
+        run: ./ci/test.sh
       - name: Benchmarks
-        run: cijail ./ci/bench.sh
+        run: ./ci/bench.sh
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
